@@ -301,7 +301,11 @@ func handleAbsPathMatch(trace execvePathsTracer, match []string) error {
 // "simple" cases like `.*`, which probably the user wants to use as `.*?`,
 // otherwise they would get filepaths like `/some/file/thing/", "` because the
 // filepath really has to stop at the last `"` character
-func TraceExecveWithFiles(straceLogPattern string, regex *regexp.Regexp) (*ExecvePaths, error) {
+func TraceExecveWithFiles(
+	straceLogPattern string,
+	fileRegex, programRegex *regexp.Regexp,
+	blacklistProgramPatterns []string,
+) (*ExecvePaths, error) {
 	// first ensure the log file is empty and exists and open it
 	mergedFile, err := files.EnsureExistsAndOpen(straceLogPattern, true)
 	if err != nil {
@@ -465,6 +469,28 @@ func TraceExecveWithFiles(straceLogPattern string, regex *regexp.Regexp) (*Execv
 	// now build up a list of path, program, and file size infos
 	for _, proc := range trace.Processes {
 		for _, pathAccess := range proc.PathAccesses {
+			if fileRegex.FindString(pathAccess.Path) == "" {
+				continue
+			}
+
+			if programRegex.FindString(proc.Exe) == "" {
+				continue
+			}
+
+			blacklisted := false
+			for _, pattern := range blacklistProgramPatterns {
+				matches, err := filepath.Match(pattern, proc.Exe)
+				if err != nil {
+					return nil, fmt.Errorf("internal error: pattern %q is invalid: %v", pattern, err)
+				}
+				if matches {
+					blacklisted = true
+					break
+				}
+			}
+			if blacklisted {
+				continue
+			}
 
 			fileInfo := CommonFileInfo{
 				Path:    pathAccess.Path,
